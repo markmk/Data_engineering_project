@@ -4,7 +4,7 @@ import psycopg
 from datetime import datetime
 import credentials  # Import credentials
 
-# Database connection configuration using values from credentials.py
+# Database connection
 DB_CONFIG = {
     'host': credentials.DB_HOST,
     'dbname': credentials.DB_NAME,
