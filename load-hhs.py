@@ -1,6 +1,7 @@
 # load-hhs.py
 import psycopg
 import pandas as pd
+import numpy as np
 import sys
 import credentials
 
@@ -27,8 +28,8 @@ data_hhs = data_hhs[["hospital_pk", "state", "hospital_name", "address",
 data_hhs = data_hhs.where(pd.notna(data_hhs), None)
 data_hhs = data_hhs.where(pd.notnull(data_hhs), None)
 
-# Convert -999 to none
-data_hhs = data_hhs.replace(-999999, None)
+# Convert -999 to NaN (convert to None later)
+data_hhs = data_hhs.replace(-999999, np.nan)
 
 # Convert lat + long columns
 data_hhs['geocoded_hospital_address'] = data_hhs['geocoded_hospital_address'].str.slice(start=7, stop=-1)
@@ -43,7 +44,13 @@ data_hhs = data_hhs.drop_duplicates(subset='hospital_pk')
 data_hhs['collection_week'] = pd.to_datetime(data_hhs['collection_week'], format='%Y-%m-%d')
 
 # Inserting data (Location Table)
-location_data = data_hhs[["city", "state", "zip", "latitude", "longitude", "fips_code"]].itertuples(index=False, name=None)
+location_data = \
+    data_hhs[["city", "state", "zip", "latitude", "longitude", "fips_code"]].itertuples(index=False, name=None)
+location_data = (
+    (city, state, zip, latitude if not np.isnan(latitude) else None,
+     longitude if not np.isnan(longitude) else None, fips_code if not np.isnan(fips_code) else None)
+    for city, state, zip, latitude, longitude, fips_code in location_data
+)
 cur.executemany(
     "INSERT INTO location (city, state, zip_code, latitude, longitude, fips_code) "
     "VALUES (%s, %s, %s, %s, %s, %s) "
@@ -59,7 +66,8 @@ latitudes = list(data_hhs['latitude'])
 longitudes = list(data_hhs['longitude'])
 fips_codes = list(data_hhs['fips_code'])
 cur.execute("SELECT id FROM location "
-            "WHERE (location.city, location.state, location.zip_code, location.latitude, location.longitude, location.fips_code) "
+            "WHERE (location.city, location.state, location.zip_code, "
+            "location.latitude, location.longitude, location.fips_code) "
             "IN (SELECT * FROM unnest(%s::text[], %s::text[], %s::integer[], %s::float[], %s::float[], %s::text[]))",
             (cities, states, zip_codes, latitudes, longitudes, fips_codes))
 location_ids = [row[0] for row in cur.fetchall()]
@@ -99,10 +107,24 @@ weekly_data = [(collection_week, all_adult, all_pediatric, all_icu, adult_occupi
                 pediatric_occupied, icu_occupied, covid_total, covid_adult_icu, hospital_id
                  in zip(data_hhs['collection_week'], data_hhs['all_adult_hospital_beds_7_day_avg'],
                         data_hhs['all_pediatric_inpatient_beds_7_day_avg'],
-                        data_hhs['total_icu_beds_7_day_avg'], data_hhs['all_adult_hospital_inpatient_bed_occupied_7_day_avg'],
+                        data_hhs['total_icu_beds_7_day_avg'],
+                        data_hhs['all_adult_hospital_inpatient_bed_occupied_7_day_avg'],
                         data_hhs['all_pediatric_inpatient_bed_occupied_7_day_avg'],
                         data_hhs['icu_beds_used_7_day_avg'], data_hhs['inpatient_beds_used_covid_7_day_avg'],
                         data_hhs['staffed_icu_adult_patients_confirmed_covid_7_day_avg'], hospital_ids)]
+weekly_data = (
+        (collection_week, all_adult if not np.isnan(all_adult) else None,
+         all_pediatric if not np.isnan(all_pediatric) else None,
+         all_icu if not np.isnan(all_icu) else None,
+         adult_occupied if not np.isnan(adult_occupied) else None,
+         pediatric_occupied if not np.isnan(pediatric_occupied) else None,
+         icu_occupied if not np.isnan(icu_occupied) else None,
+         covid_total if not np.isnan(covid_total) else None,
+         covid_adult_icu if not np.isnan(covid_adult_icu) else None,
+         hospital_id)
+        for collection_week, all_adult, all_pediatric, all_icu, adult_occupied,
+        pediatric_occupied, icu_occupied, covid_total, covid_adult_icu, hospital_id in weekly_data
+)
 try:
     cur.executemany(
         "INSERT INTO weekly_report (collection_week, all_adult_hospital_beds_7_day_avg, "
