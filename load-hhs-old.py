@@ -68,7 +68,7 @@ fips_codes = list(data_hhs['fips_code'])
 cur.execute("SELECT id FROM location "
             "WHERE (location.city, location.state, location.zip_code, "
             "location.latitude, location.longitude, location.fips_code) "
-            "IN (SELECT * FROM unnest(%s::text[], %s::text[], %s::integer[], %s::float[], %s::float[], %s::text[]))",
+            "IN (SELECT * FROM unnest(%s::text[], %s::text[], %s::text[], %s::float[], %s::float[], %s::text[]))",
             (cities, states, zip_codes, latitudes, longitudes, fips_codes))
 location_ids = [row[0] for row in cur.fetchall()]
 
