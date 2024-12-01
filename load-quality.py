@@ -1,3 +1,13 @@
+"""
+Module: load-quality.py
+
+This script processes hospital quality data from a CSV file and loads it into a PostgreSQL database.
+It verifies the existence of hospitals, adds missing location and hospital records, and inserts quality ratings.
+
+Usage:
+    python load-quality.py <rating_date> <quality-data-file.csv>
+"""
+
 import sys
 import csv
 import psycopg
@@ -13,7 +23,12 @@ DB_CONFIG = {
 }
 
 def main():
+    """
+    Main function to parse arguments, process the input CSV file, and load data into the database.
 
+    Validates the rating date format and file existence, establishes a database connection,
+    and iteratively processes each row in the CSV file.
+    """
     # Checks correct number of arguments
     if len(sys.argv) != 3:
         print("Usage: python load-quality.py <rating_date><quality-data-file.csv>")
@@ -67,6 +82,17 @@ def main():
 
 
 def process_and_insert_row(cursor, row, rating_date):
+    """
+    Processes a single row of the CSV file and inserts it into the database.
+
+    Args:
+        cursor (psycopg.Cursor): Database cursor for executing queries.
+        row (dict): A dictionary containing a single row of CSV data.
+        rating_date (datetime.date): The date of the rating.
+
+    Validates the existence of hospitals, inserts missing records into the `location`
+    and `hospital` tables, and adds a quality rating to the `hospital_quality` table.
+    """
     facility_id = row['Facility ID']
     hospital_name = row['Facility Name']
     city, state, zip_code = row['City'], row['State'], row['ZIP Code']
@@ -105,6 +131,15 @@ def process_and_insert_row(cursor, row, rating_date):
 
 
 def parse_quality_rating(value):
+    """
+    Parses and validates the hospital quality rating.
+
+    Args:
+        value (str): The quality rating as a string from the CSV.
+
+    Returns:
+        int or None: Parsed rating if valid, otherwise None.
+    """
     if not value or value.strip() == 'Not Available':
         return None
     rating = int(value) if value.isdigit() else None
@@ -115,6 +150,15 @@ def parse_quality_rating(value):
 
 
 def parse_boolean(value):
+    """
+    Parses a boolean value from a string.
+
+    Args:
+        value (str): A string representing a boolean value ('yes' or other).
+
+    Returns:
+        bool: True if the value is 'yes' (case-insensitive), otherwise False.
+    """
     if not value:
         return False
     return value.strip().lower() == 'yes'
