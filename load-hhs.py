@@ -26,6 +26,7 @@ def main():
         hospital_ids = get_hospital(cur, data_hhs)
         insert_weekly_report(cur, data_hhs, hospital_ids)
         conn.commit()
+        print(f"Data on {data_hhs.shape[0]} unique hospitals successfully inserted for week: {sys.argv[1][0:10]}")
 
     except Exception as e:
         print(f"Error occurred: {e}")
@@ -34,7 +35,6 @@ def main():
 
     finally:
         conn.close()
-        print(f"Data on {data_hhs.shape[0]} unique hospitals successfully inserted for week: {sys.argv[1][0:10]}")
 
 
 if __name__ == "__main__":
