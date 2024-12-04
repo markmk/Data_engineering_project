@@ -5,6 +5,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import psycopg
 import credentials
+import plotly.express as px
+import json
+import requests
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -70,34 +73,52 @@ def plot_beds_utilization_streamlit(df):
     st.pyplot(fig)
 
 
-def plot_total_beds_used_over_time_streamlit(df):
+def plot_covid_cases_map(df):
     """
-    Plot the total beds used over time in Streamlit.
+    Create a map showing the number of COVID cases by state.
 
     Args:
-        df (pd.DataFrame): DataFrame with 'collection_week', 'total_beds_used_all_cases',
-            and 'total_beds_used_covid_cases' columns.
+        df (pd.DataFrame): DataFrame with 'state' and 'total_covid_cases' columns.
+
+    Returns:
+        None: Displays the map in Streamlit.
     """
     if df.empty:
-        st.warning("No data available for Total Beds Used Over Time.")
+        st.warning("No data available for COVID cases by state.")
         return
 
-    # Convert data types
-    df['collection_week'] = pd.to_datetime(df['collection_week'])
-    df['total_beds_used_all_cases'] = pd.to_numeric(df['total_beds_used_all_cases'], errors='coerce')
-    df['total_beds_used_covid_cases'] = pd.to_numeric(df['total_beds_used_covid_cases'], errors='coerce')
+    # Ensure state is a string
+    df['state'] = df['state'].astype(str)
 
-    # Create the plot
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.plot(df["collection_week"], df["total_beds_used_all_cases"], label="All Cases", marker='o')
-    ax.plot(df["collection_week"], df["total_beds_used_covid_cases"], label="COVID Cases", marker='o')
-    ax.set_title("Total Beds Used Over Time")
-    ax.set_xlabel("Week")
-    ax.set_ylabel("Number of Beds Used")
-    ax.legend()
+    # Fetch GeoJSON for US states
+    geojson_url = "https://raw.githubusercontent.com/PublicaMundi/MappingAPI/master/data/geojson/us-states.json"
+    try:
+        response = requests.get(geojson_url)
+        response.raise_for_status()
+        geojson = response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error fetching GeoJSON data: {e}")
+        return
 
-    # Render the plot in Streamlit
-    st.pyplot(fig)
+    # Create the choropleth map
+    fig = px.choropleth(
+        df,
+        geojson=geojson,
+        locations='state',
+        locationmode='USA-states',  # Use state abbreviations
+        color='total_covid_cases',
+        color_continuous_scale="Viridis",
+        scope="usa",
+        title="Number of COVID Cases by State"
+    )
+
+    fig.update_geos(
+        fitbounds="locations",
+        visible=False
+    )
+
+    # Render the map in Streamlit
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def create_table_streamlit(df, title):
@@ -257,15 +278,15 @@ QUERIES = {
     GROUP BY hq.quality_rating
     ORDER BY hq.quality_rating;
     """,
-    "total_beds_used_over_time": """
+    "covid_cases_by_state": """
     SELECT
-        collection_week,
-        SUM(all_adult_hospital_inpatient_bed_occupied_7_day_avg + all_pediatric_inpatient_bed_occupied_7_day_avg) AS total_beds_used_all_cases,
-        SUM(inpatient_beds_used_covid_7_day_avg) AS total_beds_used_covid_cases
-    FROM weekly_report
-    WHERE collection_week <= %s
-    GROUP BY collection_week
-    ORDER BY collection_week;
+        loc.state,
+        SUM(wr.inpatient_beds_used_covid_7_day_avg) AS total_covid_cases
+    FROM weekly_report wr
+    JOIN hospital h ON wr.hospital_weekly_id = h.hospital_pk
+    JOIN location loc ON h.location_id = loc.id
+    GROUP BY loc.state
+    ORDER BY loc.state;
     """,
     "states_fewest_open_beds": """
     SELECT
@@ -359,13 +380,13 @@ def generate_report(selected_date, conn):
     else:
         st.warning("No data available for Beds Utilization by Quality Rating.")
 
-    # 4. Total Beds Used Over Time
-    st.markdown("### Total Beds Used Over Time")
-    total_beds_used_df = execute_query(QUERIES["total_beds_used_over_time"], conn, [selected_date_str])
-    if not total_beds_used_df.empty:
-        plot_total_beds_used_over_time_streamlit(total_beds_used_df)
+    # 4. COVID Cases by State Map
+    st.markdown("### COVID Cases by State")
+    covid_cases_df = execute_query(QUERIES["covid_cases_by_state"], conn)
+    if not covid_cases_df.empty:
+        plot_covid_cases_map(covid_cases_df)
     else:
-        st.warning("No data available for Total Beds Used Over Time.")
+        st.warning("No data available for COVID cases by state.")
 
     # Additional Analysis: States with Fewest Open Beds
     st.markdown("### States with Fewest Open Beds")
