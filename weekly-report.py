@@ -1,16 +1,16 @@
-import sys
+import streamlit as st
 import logging
 from datetime import datetime
-
 import matplotlib.pyplot as plt
 import pandas as pd
 import psycopg
-from matplotlib.backends.backend_pdf import PdfPages
-
 import credentials
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+# Streamlit Configuration
+st.set_page_config(page_title="HHS COVID-19 Weekly Report", layout="wide")
 
 # Database Configuration
 DB_CONFIG = {
@@ -38,99 +38,78 @@ def execute_query(query, conn, params=None):
             cur.execute(query, params)
             colnames = [desc[0] for desc in cur.description]
             rows = cur.fetchall()
-        df = pd.DataFrame(rows, columns=colnames)
-        logging.info(
-            f"Executed query: {query.strip().splitlines()[0]}... "
-            f"Retrieved {len(df)} records."
-        )
-        return df
+        return pd.DataFrame(rows, columns=colnames)
     except Exception as e:
         logging.error(f"Error executing query: {e}")
         return pd.DataFrame()
 
 
-def plot_beds_utilization(df, pdf):
+def plot_beds_utilization_streamlit(df):
     """
-    Plot beds utilization by hospital quality rating and save to PDF.
+    Plot beds utilization by hospital quality rating in Streamlit.
 
     Args:
         df (pd.DataFrame): DataFrame with 'quality_rating' and 'percent_beds_in_use' columns.
-        pdf (PdfPages): PDF object to save the plot.
     """
     if df.empty:
-        logging.warning("No data available for Beds Utilization by Quality Rating plot.")
+        st.warning("No data available for Beds Utilization by Quality Rating.")
         return
-    # Convert data types
+
+    # Ensure the data types are correct
     df['quality_rating'] = df['quality_rating'].astype(str)
     df['percent_beds_in_use'] = pd.to_numeric(df['percent_beds_in_use'], errors='coerce')
 
-    plt.figure(figsize=(10, 6))
-    plt.bar(df["quality_rating"], df["percent_beds_in_use"], color="teal")
-    plt.title("Beds Utilization by Hospital Quality Rating")
-    plt.xlabel("Hospital Quality Rating")
-    plt.ylabel("Percent of Beds in Use (%)")
-    # Format y-axis to show one decimal place
-    plt.gca().yaxis.set_major_formatter(
-        plt.FuncFormatter(lambda x, _: f'{x:.1f}')
-    )
-    plt.tight_layout()
-    pdf.savefig()
-    plt.close()
-    logging.info("Beds Utilization by Hospital Quality Rating plot added to PDF.")
+    # Create the bar plot
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.bar(df["quality_rating"], df["percent_beds_in_use"], color="teal")
+    ax.set_title("Beds Utilization by Hospital Quality Rating")
+    ax.set_xlabel("Hospital Quality Rating")
+    ax.set_ylabel("Percent of Beds in Use (%)")
+
+    # Render the plot in Streamlit
+    st.pyplot(fig)
 
 
-def plot_total_beds_used_over_time(df, pdf):
+def plot_total_beds_used_over_time_streamlit(df):
     """
-    Plot the total beds used over time and save to PDF.
+    Plot the total beds used over time in Streamlit.
 
     Args:
         df (pd.DataFrame): DataFrame with 'collection_week', 'total_beds_used_all_cases',
             and 'total_beds_used_covid_cases' columns.
-        pdf (PdfPages): PDF object to save the plot.
     """
     if df.empty:
-        logging.warning("No data available for Total Beds Used Over Time plot.")
+        st.warning("No data available for Total Beds Used Over Time.")
         return
+
     # Convert data types
     df['collection_week'] = pd.to_datetime(df['collection_week'])
-    df['total_beds_used_all_cases'] = pd.to_numeric(
-        df['total_beds_used_all_cases'], errors='coerce'
-    )
-    df['total_beds_used_covid_cases'] = pd.to_numeric(
-        df['total_beds_used_covid_cases'], errors='coerce'
-    )
+    df['total_beds_used_all_cases'] = pd.to_numeric(df['total_beds_used_all_cases'], errors='coerce')
+    df['total_beds_used_covid_cases'] = pd.to_numeric(df['total_beds_used_covid_cases'], errors='coerce')
 
-    plt.figure(figsize=(10, 6))
-    plt.plot(
-        df["collection_week"], df["total_beds_used_all_cases"],
-        label="All Cases", marker='o'
-    )
-    plt.plot(
-        df["collection_week"], df["total_beds_used_covid_cases"],
-        label="COVID Cases", marker='o'
-    )
-    plt.xticks(rotation=45)
-    plt.title("Total Beds Used Over Time")
-    plt.xlabel("Week")
-    plt.ylabel("Number of Beds Used")
-    plt.legend()
-    plt.tight_layout()
-    pdf.savefig()
-    plt.close()
-    logging.info("Total Beds Used Over Time plot added to PDF.")
+    # Create the plot
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(df["collection_week"], df["total_beds_used_all_cases"], label="All Cases", marker='o')
+    ax.plot(df["collection_week"], df["total_beds_used_covid_cases"], label="COVID Cases", marker='o')
+    ax.set_title("Total Beds Used Over Time")
+    ax.set_xlabel("Week")
+    ax.set_ylabel("Number of Beds Used")
+    ax.legend()
+
+    # Render the plot in Streamlit
+    st.pyplot(fig)
 
 
-def create_table_pdf(df, title, pdf):
+def create_table_streamlit(df, title):
     """
-    Create a table in the PDF report with dynamically adjusted column widths.
+    Display a table in Streamlit with dynamically adjusted column formatting.
 
     Args:
         df (pd.DataFrame): DataFrame containing the data to display.
         title (str): Title for the table.
-        pdf (PdfPages): PDF object to save the table.
     """
     if df.empty:
-        logging.warning(f"No data available for {title}.")
+        st.warning(f"No data available for {title}.")
         return
 
     # Format numeric columns to one decimal place
@@ -142,56 +121,26 @@ def create_table_pdf(df, title, pdf):
         else:
             df[col] = df[col].apply(lambda x: f'{x:.1f}' if pd.notnull(x) else '')
 
-    # Dynamically adjust the column widths
-    col_widths = [
-        max(len(str(value)) for value in df[col].values) for col in df.columns
-    ]
-    max_col_width = max(col_widths) + 2
-    total_width = sum(col_widths) + len(df.columns) * 2
-
-    plt.figure(figsize=(max(total_width / 8, 12), max(len(df) * 0.4 + 2, 6)))
-    plt.axis('off')
-    table = plt.table(
-        cellText=df.values.tolist(),
-        colLabels=df.columns.tolist(),
-        loc='center',
-        cellLoc='center',
-        colLoc='center'
-    )
-
-    # Adjust font size and column widths
-    table.auto_set_font_size(False)
-    table.set_fontsize(8)
-    for i, width in enumerate(col_widths):
-        table.auto_set_column_width(i)  # Adjust individual column width
-        col_width = min(width, max_col_width)
-        table.auto_set_column_width(i)
-
-    plt.title(title, fontsize=14)
-    pdf.savefig()
-    plt.close()
-    logging.info(f"{title} table added to PDF.")
+    st.header(title)
+    st.table(df)
 
 
-def plot_hospital_utilization_by_state(df, pdf):
+def plot_hospital_utilization_streamlit(df):
     """
-    Plot hospital utilization by state over time for top 10 states and save to PDF.
+    Plot hospital utilization by state over time for top 10 states in Streamlit.
 
     Args:
         df (pd.DataFrame): DataFrame with 'state', 'collection_week',
             and 'percent_utilization' columns.
-        pdf (PdfPages): PDF object to save the plot.
     """
     if df.empty:
-        logging.warning("No data available for Hospital Utilization by State plot.")
+        st.warning("No data available for Hospital Utilization by State plot.")
         return
 
     # Convert data types
     df['collection_week'] = pd.to_datetime(df['collection_week'])
     df = df.dropna(subset=['percent_utilization'])
-    df['percent_utilization'] = pd.to_numeric(
-        df['percent_utilization'], errors='coerce'
-    )
+    df['percent_utilization'] = pd.to_numeric(df['percent_utilization'], errors='coerce')
 
     # Get the latest date
     latest_date = df['collection_week'].max()
@@ -228,28 +177,19 @@ def plot_hospital_utilization_by_state(df, pdf):
     plt.legend(loc='center left', bbox_to_anchor=(1.05, 0.5), fontsize='small')
     plt.tight_layout(rect=[0, 0, 0.85, 1])
 
-    # Save the figure to the PDF
-    pdf.savefig()
-    plt.close()
-    logging.info("Hospital Utilization by State plot (top 10) added to PDF.")
+    st.pyplot(plt)
 
 
-def add_text_page(pdf, title, text):
+def add_text_streamlit(title, text):
     """
-    Add a page with text to the PDF report.
+    Add a text section to the Streamlit report.
 
     Args:
-        pdf (PdfPages): PDF object to save the page.
-        title (str): Title of the text page.
-        text (str): Body text to include on the page.
+        title (str): Title of the text section.
+        text (str): Body text to include.
     """
-    plt.figure(figsize=(8.5, 11))
-    plt.axis('off')
-    plt.title(title, fontsize=20, loc='left')
-    plt.text(0.1, 0.8, text, fontsize=12, ha='left', wrap=True)
-    pdf.savefig()
-    plt.close()
-    logging.info(f"Text page '{title}' added to PDF.")
+    st.subheader(title)
+    st.markdown(text)
 
 
 # Adjusted Queries
@@ -381,7 +321,7 @@ QUERIES = {
 
 def generate_report(selected_date, conn):
     """
-    Generate the COVID-19 weekly report PDF.
+    Generate the COVID-19 weekly report interactively in Streamlit.
 
     Args:
         selected_date (datetime.date): The week-ending date for the report.
@@ -389,173 +329,91 @@ def generate_report(selected_date, conn):
     """
     selected_date_str = selected_date.strftime('%Y-%m-%d')
 
-    # Fetch data
-    data_frames = {}
-    for key, query in QUERIES.items():
-        data_frames[key] = execute_query(query, conn, [selected_date_str])
+    # Header
+    st.header(f"HHS COVID-19 Weekly Report")
+    st.subheader(f"Week Ending: {selected_date_str}")
+    st.write("This report provides insights into hospital bed utilization and COVID-19 trends.")
 
-    # Output filename
-    report_filename = f"report-{selected_date_str}.pdf"
+    # 1. Hospital Records Summary
+    st.markdown("### Hospital Records Summary")
+    hospital_records_df = execute_query(QUERIES["hospital_records_summary"], conn, [selected_date_str])
+    if not hospital_records_df.empty:
+        hospital_records_df['collection_week'] = pd.to_datetime(hospital_records_df['collection_week']).dt.strftime('%Y-%m-%d')
+        st.table(hospital_records_df)
+    else:
+        st.warning("No data available for Hospital Records Summary.")
 
-    # Generate Report
-    with PdfPages(report_filename) as pdf:
-        # Cover Page
-        plt.figure(figsize=(8.5, 11))
-        plt.axis('off')
-        plt.text(0.1, 0.9, "HHS COVID-19 Weekly Report", fontsize=24, ha='left')
-        plt.text(0.1, 0.85, f"Week Ending: {selected_date_str}", fontsize=18, ha='left')
-        plt.text(0.1, 0.8, "Department of Health and Human Services", fontsize=14, ha='left')
-        pdf.savefig()
-        plt.close()
-        logging.info("Cover page added to PDF.")
+    # 2. Beds Summary
+    st.markdown("### Beds Summary (Last 5 Weeks)")
+    beds_summary_df = execute_query(QUERIES["beds_summary"], conn, [selected_date_str])
+    if not beds_summary_df.empty:
+        st.table(beds_summary_df)
+    else:
+        st.warning("No data available for Beds Summary.")
 
-        # Explanatory Text
-        add_text_page(
-            pdf,
-            "Introduction",
-            "This report provides a summary of the COVID-19 situation based on hospital bed "
-            "utilization and availability as of the selected week. It includes analyses on "
-            "hospital records, bed utilization, and additional insights to aid in decision-making."
-        )
+    # 3. Beds Utilization by Quality Rating
+    st.markdown("### Beds Utilization by Quality Rating")
+    beds_utilization_df = execute_query(QUERIES["beds_utilization"], conn, [selected_date_str])
+    if not beds_utilization_df.empty:
+        plot_beds_utilization_streamlit(beds_utilization_df)
+    else:
+        st.warning("No data available for Beds Utilization by Quality Rating.")
 
-        # 1. Hospital Records Summary
-        hospital_records_df = data_frames.get("hospital_records_summary")
-        if hospital_records_df is not None and not hospital_records_df.empty:
-            hospital_records_df['collection_week'] = pd.to_datetime(
-                hospital_records_df['collection_week']
-            ).dt.strftime('%Y-%m-%d')
-            create_table_pdf(hospital_records_df, "Hospital Records Summary", pdf)
-        else:
-            logging.warning("No data available for Hospital Records Summary.")
+    # 4. Total Beds Used Over Time
+    st.markdown("### Total Beds Used Over Time")
+    total_beds_used_df = execute_query(QUERIES["total_beds_used_over_time"], conn, [selected_date_str])
+    if not total_beds_used_df.empty:
+        plot_total_beds_used_over_time_streamlit(total_beds_used_df)
+    else:
+        st.warning("No data available for Total Beds Used Over Time.")
 
-        # 2. Beds Summary Table
-        beds_summary_df = data_frames.get("beds_summary")
-        if beds_summary_df is not None and not beds_summary_df.empty:
-            beds_summary_df = beds_summary_df.rename(columns={
-                'collection_week': 'Week',
-                'total_adult_beds_available': 'Adult Beds Available',
-                'total_pediatric_beds_available': 'Pediatric Beds Available',
-                'total_adult_beds_occupied': 'Adult Beds Occupied',
-                'total_pediatric_beds_occupied': 'Pediatric Beds Occupied',
-                'total_covid_beds_used': 'COVID Beds Used'
-            })
-            beds_summary_df['Week'] = pd.to_datetime(
-                beds_summary_df['Week']
-            ).dt.strftime('%Y-%m-%d')
-            create_table_pdf(beds_summary_df, "Beds Summary (Last 5 Weeks)", pdf)
-        else:
-            logging.warning("No data available for Beds Summary.")
+    # Additional Analysis: States with Fewest Open Beds
+    st.markdown("### States with Fewest Open Beds")
+    fewest_open_beds_df = execute_query(QUERIES["states_fewest_open_beds"], conn, [selected_date_str])
+    if not fewest_open_beds_df.empty:
+        st.table(fewest_open_beds_df)
+    else:
+        st.warning("No data available for States with Fewest Open Beds.")
 
-        # 3. Beds Utilization by Quality Rating
-        beds_utilization_df = data_frames.get("beds_utilization")
-        if beds_utilization_df is not None and not beds_utilization_df.empty:
-            beds_utilization_df['percent_beds_in_use'] = pd.to_numeric(
-                beds_utilization_df['percent_beds_in_use'], errors='coerce'
-            )
-            plot_beds_utilization(beds_utilization_df, pdf)
-        else:
-            logging.warning("No data available for Beds Utilization by Quality Rating.")
+    # Additional Analysis: Hospitals Not Reporting Data
+    st.markdown("### Hospitals Not Reporting Data")
+    hospitals_not_reporting_df = execute_query(QUERIES["hospitals_not_reporting"], conn, [selected_date_str])
+    if not hospitals_not_reporting_df.empty:
+        st.table(hospitals_not_reporting_df)
+    else:
+        st.warning("No data available for Hospitals Not Reporting Data.")
 
-        # 4. Total Beds Used Over Time
-        total_beds_used_df = data_frames.get("total_beds_used_over_time")
-        if total_beds_used_df is not None and not total_beds_used_df.empty:
-            plot_total_beds_used_over_time(total_beds_used_df, pdf)
-        else:
-            logging.warning("No data available for Total Beds Used Over Time.")
+    # Additional Analysis: Hospital Utilization by State Over Time
+    st.markdown("### Hospital Utilization by State Over Time")
+    hospital_utilization_df = execute_query(QUERIES["hospital_utilization_by_state_over_time"], conn, [selected_date_str])
+    if not hospital_utilization_df.empty:
+        plot_hospital_utilization_streamlit(hospital_utilization_df)
+    else:
+        st.warning("No data available for Hospital Utilization by State Over Time.")
 
-        # Additional Analysis 1: States with Fewest Open Beds
-        fewest_open_beds_df = data_frames.get("states_fewest_open_beds")
-        if fewest_open_beds_df is not None and not fewest_open_beds_df.empty:
-            fewest_open_beds_df = fewest_open_beds_df.rename(columns={
-                'state': 'State',
-                'open_beds': 'Number of Open Beds'
-            })
-            create_table_pdf(
-                fewest_open_beds_df,
-                "States with Fewest Open Beds (Negative = Beds Oversubscribed)",
-                pdf
-            )
-        else:
-            logging.warning("No data available for States with Fewest Open Beds.")
-
-        # Additional Analysis 2: Hospitals Not Reporting Data
-        hospitals_not_reporting_df = data_frames.get("hospitals_not_reporting")
-        if hospitals_not_reporting_df is not None and not hospitals_not_reporting_df.empty:
-            hospitals_not_reporting_df = hospitals_not_reporting_df.rename(columns={
-                'hospital_name': 'Hospital Name',
-                'city': 'City',
-                'state': 'State',
-                'last_reported_week': 'Last Reported Week'
-            })
-            create_table_pdf(
-                hospitals_not_reporting_df,
-                "Hospitals Not Reporting Data in the Past Week",
-                pdf
-            )
-        else:
-            logging.warning("No data available for Hospitals Not Reporting Data.")
-
-        # Additional Analysis 3: Hospital Utilization by State Over Time
-        hospital_utilization_df = data_frames.get("hospital_utilization_by_state_over_time")
-        if hospital_utilization_df is not None and not hospital_utilization_df.empty:
-            try:
-                # Convert 'collection_week' to datetime
-                hospital_utilization_df['collection_week'] = pd.to_datetime(
-                    hospital_utilization_df['collection_week']
-                )
-                # Convert 'percent_utilization' to numeric
-                hospital_utilization_df['percent_utilization'] = pd.to_numeric(
-                    hospital_utilization_df['percent_utilization'], errors='coerce'
-                )
-                plot_hospital_utilization_by_state(hospital_utilization_df, pdf)
-            except Exception as e:
-                logging.error(f"Error processing hospital utilization data: {e}")
-        else:
-            logging.warning("No data available for Hospital Utilization by State Over Time.")
-
-        # Final Page
-        add_text_page(
-            pdf,
-            "Conclusion",
-            "This concludes the weekly report. The data presented aims to inform "
-            "decision-making and highlight areas requiring attention."
-        )
-
-    logging.info(f"Report saved as {report_filename}")
-    logging.info(f"Report generation completed: {report_filename}")
+    # Conclusion
+    st.markdown("### Conclusion")
+    st.write("This concludes the weekly report. The data presented aims to inform decision-making and highlight areas requiring attention.")
 
 
 def main():
     """
-    The main entry point of the script.
-
-    Parses command-line arguments and initiates the report generation process.
+    Streamlit application entry point.
     """
-    if len(sys.argv) < 2:
-        print("Usage: python weekly-report.py <date>")
-        sys.exit(1)
+    st.sidebar.title("HHS Weekly Report Generator")
+    st.sidebar.write("Select options below to generate the report.")
 
-    selected_date_str = sys.argv[1]
-    try:
-        selected_date = datetime.strptime(selected_date_str, '%Y-%m-%d').date()
-    except ValueError:
-        print("Invalid date format. Use YYYY-MM-DD (e.g., 2023-09-30).")
-        sys.exit(1)
+    # Date selection
+    selected_date = st.sidebar.date_input("Select Week Ending Date", datetime.today())
+    st.sidebar.write(f"Selected date: {selected_date.strftime('%Y-%m-%d')}")
 
-    # Establish database connection
+    # Database Connection
     try:
-        conn = psycopg.connect(**DB_CONFIG, autocommit=True)
-        logging.info("Database connection established.")
-        generate_report(selected_date, conn)
+        with psycopg.connect(**DB_CONFIG, autocommit=True) as conn:
+            st.sidebar.success("Connected to the database.")
+            generate_report(selected_date, conn)
     except Exception as e:
-        logging.error(
-            "An error occurred while connecting to the database or generating the report: "
-            f"{e}"
-        )
-        sys.exit(1)
-    finally:
-        conn.close()
-        logging.info("Database connection closed.")
+        st.sidebar.error(f"Database connection error: {e}")
 
 
 if __name__ == "__main__":
