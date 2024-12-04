@@ -396,6 +396,30 @@ def generate_report(selected_date, conn):
     st.write("This concludes the weekly report. The data presented aims to inform decision-making and highlight areas requiring attention.")
 
 
+
+def get_available_dates(conn):
+    """
+    Retrieve the available dates for the last five weeks from the database.
+
+    Args:
+        conn (psycopg.Connection): The database connection object.
+
+    Returns:
+        list: A list of available dates in the format 'YYYY-MM-DD'.
+    """
+    query = """
+    SELECT DISTINCT collection_week
+    FROM weekly_report
+    ORDER BY collection_week DESC
+    LIMIT 5;
+    """
+    df = execute_query(query, conn)
+    if not df.empty:
+        return df['collection_week'].astype(str).tolist()
+    else:
+        return []
+
+
 def main():
     """
     Streamlit application entry point.
@@ -403,15 +427,24 @@ def main():
     st.sidebar.title("HHS Weekly Report Generator")
     st.sidebar.write("Select options below to generate the report.")
 
-    # Date selection
-    selected_date = st.sidebar.date_input("Select Week Ending Date", datetime.today())
-    st.sidebar.write(f"Selected date: {selected_date.strftime('%Y-%m-%d')}")
-
     # Database Connection
     try:
         with psycopg.connect(**DB_CONFIG, autocommit=True) as conn:
             st.sidebar.success("Connected to the database.")
-            generate_report(selected_date, conn)
+
+            # Get available dates
+            available_dates = get_available_dates(conn)
+
+            if available_dates:
+                # Let the user select a date from the available options
+                selected_date_str = st.sidebar.selectbox("Select Week Ending Date", available_dates)
+                selected_date = datetime.strptime(selected_date_str, '%Y-%m-%d').date()
+                st.sidebar.write(f"Selected date: {selected_date}")
+                
+                # Generate the report for the selected date
+                generate_report(selected_date, conn)
+            else:
+                st.sidebar.error("No available dates found in the database.")
     except Exception as e:
         st.sidebar.error(f"Database connection error: {e}")
 
