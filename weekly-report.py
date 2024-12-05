@@ -4,6 +4,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import pandas as pd
 import psycopg
+import credentials
 import plotly.express as px
 import json
 import requests
@@ -13,6 +14,14 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
 # Streamlit Configuration
 st.set_page_config(page_title="HHS COVID-19 Weekly Report", layout="wide")
+
+# Database Configuration
+DB_CONFIG = {
+    'host': credentials.DB_HOST,
+    'dbname': credentials.DB_NAME,
+    'user': credentials.DB_USER,
+    'password': credentials.DB_PASSWORD
+}
 
 
 def execute_query(query, conn, params=None):
