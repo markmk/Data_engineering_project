@@ -2,7 +2,7 @@
 Module: load-quality.py
 
 This script processes hospital quality data from a CSV file and loads it into a PostgreSQL database.
-It verifies the existence of hospitals, adds missing location and hospital records, and inserts quality ratings.
+It verifies the existence of hospitals, adds missing location and hospital records, and inserts quality ratings in batches.
 
 Usage:
     python load-quality.py <rating_date> <quality-data-file.csv>
@@ -22,6 +22,8 @@ DB_CONFIG = {
     'password': credentials.DB_PASSWORD
 }
 
+BATCH_SIZE = 1000  # Number of rows to process per batch
+
 def main():
     """
     Main function to parse arguments, process the input CSV file, and load data into the database.
@@ -31,7 +33,7 @@ def main():
     """
     # Checks correct number of arguments
     if len(sys.argv) != 3:
-        print("Usage: python load-quality.py <rating_date><quality-data-file.csv>")
+        print("Usage: python load-quality.py <rating_date> <quality-data-file.csv>")
         sys.exit(1)
 
     # Access arguments
@@ -49,25 +51,33 @@ def main():
     conn = psycopg.connect(**DB_CONFIG)
     cur = conn.cursor()
 
-    # Open CSV file and process each row
     try:
         with open(csv_file, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
-            row_count = 0
-            for row in reader:
-                try:
-                    process_and_insert_row(cur, row, rating_date)  # Corrected to pass only three arguments
-                    row_count += 1
-                    # Added counter to print progress every 100 rows
-                    if row_count % 100 == 0:
-                        print(f"Processed {row_count} rows...")
-                except Exception:
-                    print(f"\nError processing row {row_count + 1}:")
-                    print("Row data:", row)
-                    raise
+            location_batch = []
+            hospital_batch = []
+            quality_batch = []
+
+            for row_count, row in enumerate(reader, start=1):
+                process_row(location_batch, hospital_batch, quality_batch, row, rating_date)
+
+                # Insert batches when reaching the batch size
+                if row_count % BATCH_SIZE == 0:
+                    insert_batches(cur, location_batch, hospital_batch, quality_batch)
+                    print(f"Processed {row_count} rows...")
+                    # Clear batches after insertion
+                    location_batch.clear()
+                    hospital_batch.clear()
+                    quality_batch.clear()
+
+            # Insert remaining records
+            if location_batch or hospital_batch or quality_batch:
+                insert_batches(cur, location_batch, hospital_batch, quality_batch)
+                print(f"Processed {row_count} rows...")
+
         # Commit transaction
         conn.commit()
-        print(f"\nData loaded successfully. Processed {row_count} rows.")
+        print("\nData loaded successfully.")
 
     except FileNotFoundError:
         print(f"File not found: {csv_file}")
@@ -81,17 +91,16 @@ def main():
         print("Database connection closed.")
 
 
-def process_and_insert_row(cursor, row, rating_date):
+def process_row(location_batch, hospital_batch, quality_batch, row, rating_date):
     """
-    Processes a single row of the CSV file and inserts it into the database.
+    Processes a single row of the CSV file and adds it to the appropriate batch.
 
     Args:
-        cursor (psycopg.Cursor): Database cursor for executing queries.
+        location_batch (list): Batch for location records.
+        hospital_batch (list): Batch for hospital records.
+        quality_batch (list): Batch for quality ratings.
         row (dict): A dictionary containing a single row of CSV data.
         rating_date (datetime.date): The date of the rating.
-
-    Validates the existence of hospitals, inserts missing records into the `location`
-    and `hospital` tables, and adds a quality rating to the `hospital_quality` table.
     """
     facility_id = row['Facility ID']
     hospital_name = row['Facility Name']
@@ -101,33 +110,52 @@ def process_and_insert_row(cursor, row, rating_date):
     hospital_type = row['Hospital Type']
     quality_rating = parse_quality_rating(row['Hospital overall rating'])
 
-    # Ensure the `facility_id` exists in `hospital`
-    cursor.execute("SELECT 1 FROM hospital WHERE hospital_pk = %s", (facility_id,))
-    if not cursor.fetchone():
-        # Insert into `location`
-        cursor.execute("""
-            INSERT INTO location (city, state, zip_code)
-            VALUES (%s, %s, %s)
-            ON CONFLICT DO NOTHING
-            RETURNING id
-        """, (city, state, zip_code))
-        location_id = cursor.fetchone()[0] if cursor.rowcount else None
+    # Add to location batch
+    location_batch.append((city, state, zip_code))
 
-        # Insert into `hospital`
-        cursor.execute("""
-            INSERT INTO hospital (hospital_pk, hospital_name, location_id)
-            VALUES (%s, %s, %s)
-            ON CONFLICT DO NOTHING
-        """, (facility_id, hospital_name, location_id))
+    # Add to hospital batch
+    hospital_batch.append((facility_id, hospital_name, city, state, zip_code))
+
+    # Add to quality batch
+    quality_batch.append((
+        facility_id, quality_rating, rating_date, ownership, hospital_type, emergency_services
+    ))
 
 
-    # Insert into `hospital_quality`
-    cursor.execute("""
+def insert_batches(cursor, location_batch, hospital_batch, quality_batch):
+    """
+    Inserts batched records into the database.
+
+    Args:
+        cursor (psycopg.Cursor): Database cursor for executing queries.
+        location_batch (list): Batch of location records.
+        hospital_batch (list): Batch of hospital records.
+        quality_batch (list): Batch of quality ratings.
+    """
+    # Insert into location table
+    cursor.executemany("""
+        INSERT INTO location (city, state, zip_code)
+        VALUES (%s, %s, %s)
+        ON CONFLICT DO NOTHING
+    """, location_batch)
+
+    # Insert into hospital table
+    cursor.executemany("""
+        INSERT INTO hospital (hospital_pk, hospital_name, location_id)
+        VALUES (%s, %s, (
+            SELECT id FROM location WHERE city = %s AND state = %s AND zip_code = %s
+        ))
+        ON CONFLICT DO NOTHING
+    """, hospital_batch)
+
+    # Insert into hospital_quality table
+    cursor.executemany("""
         INSERT INTO hospital_quality (
             facility_id, quality_rating, rating_date, ownership, hospital_type, provides_emergency_services
         )
         VALUES (%s, %s, %s, %s, %s, %s)
-    """, (facility_id, quality_rating, rating_date, ownership, hospital_type, emergency_services))
+        ON CONFLICT DO NOTHING
+    """, quality_batch)
 
 
 def parse_quality_rating(value):
