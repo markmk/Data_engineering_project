@@ -105,7 +105,7 @@ def process_row(location_batch, hospital_batch, quality_batch, row, rating_date)
     """
     facility_id = row['Facility ID']
     hospital_name = row['Facility Name']
-    city = row['City/Town']  # Updated column name
+    city = row['City']
     state = row['State']
     zip_code = row['ZIP Code']
     ownership = row['Hospital Ownership']
