@@ -4,7 +4,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import pandas as pd
 import psycopg
-from credentials import DB_HOST, DB_NAME, DB_USER, DB_PASSWORD
+import credentials
 import plotly.express as px
 import json
 import requests
@@ -468,14 +468,7 @@ def main():
 
     # Database Connection
     try:
-        # Establish database connection
-        with psycopg.connect(
-            host=DB_HOST,
-            dbname=DB_NAME,
-            user=DB_USER,
-            password=DB_PASSWORD,
-            autocommit=True
-        ) as conn:
+        with psycopg.connect(**DB_CONFIG, autocommit=True) as conn:
             st.sidebar.success("Connected to the database.")
 
             # Get available dates
@@ -486,7 +479,7 @@ def main():
                 selected_date_str = st.sidebar.selectbox("Select Week Ending Date", available_dates)
                 selected_date = datetime.strptime(selected_date_str, '%Y-%m-%d').date()
                 st.sidebar.write(f"Selected date: {selected_date}")
-   
+                
                 # Generate the report for the selected date
                 generate_report(selected_date, conn)
             else:
