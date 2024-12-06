@@ -10,6 +10,7 @@ import json
 import requests
 from datetime import timedelta
 import matplotlib.dates as mdates
+import numpy as np
 
 
 # Configure logging
@@ -56,18 +57,24 @@ def plot_beds_utilization_streamlit(df):
 
     Args:
         df (pd.DataFrame): DataFrame with 'quality_rating' and 'percent_beds_in_use' columns.
-    """
+    """    
     if df.empty:
         st.warning("No data available for Beds Utilization by Quality Rating.")
         return
 
     # Ensure the data types are correct
-    df['quality_rating'] = df['quality_rating'].astype(str)
     df['percent_beds_in_use'] = pd.to_numeric(df['percent_beds_in_use'], errors='coerce')
+
+    # Create a boolean mask to filter out rows where 'percent_beds_in_use' is NaN
+    valid_data = df[~np.isnan(df['quality_rating'])]
+
+    if valid_data.empty:
+        st.warning("No data available for Beds Utilization by Quality Rating.")
+        return
 
     # Create the bar plot
     fig, ax = plt.subplots(figsize=(10, 6))
-    ax.bar(df["quality_rating"], df["percent_beds_in_use"], color="teal")
+    ax.bar(valid_data["quality_rating"], valid_data["percent_beds_in_use"], color="teal")
     ax.set_title("Beds Utilization by Hospital Quality Rating")
     ax.set_xlabel("Hospital Quality Rating")
     ax.set_ylabel("Percent of Beds in Use (%)")
