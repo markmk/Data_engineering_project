@@ -24,6 +24,7 @@ DB_CONFIG = {
 
 BATCH_SIZE = 1000  # Number of rows to process per batch
 
+
 def main():
     """
     Main function to parse arguments, process the input CSV file, and load data into the database.
@@ -104,7 +105,9 @@ def process_row(location_batch, hospital_batch, quality_batch, row, rating_date)
     """
     facility_id = row['Facility ID']
     hospital_name = row['Facility Name']
-    city, state, zip_code = row['City'], row['State'], row['ZIP Code']
+    city = row['City/Town']  # Updated column name
+    state = row['State']
+    zip_code = row['ZIP Code']
     ownership = row['Hospital Ownership']
     emergency_services = parse_boolean(row['Emergency Services'])
     hospital_type = row['Hospital Type']
@@ -124,31 +127,25 @@ def process_row(location_batch, hospital_batch, quality_batch, row, rating_date)
 
 def insert_batches(cursor, location_batch, hospital_batch, quality_batch):
     """
-    Inserts batched records into the database.
-
-    Args:
-        cursor (psycopg.Cursor): Database cursor for executing queries.
-        location_batch (list): Batch of location records.
-        hospital_batch (list): Batch of hospital records.
-        quality_batch (list): Batch of quality ratings.
+    Inserts batched records into the database with improved location handling.
     """
-    # Insert into location table
     cursor.executemany("""
         INSERT INTO location (city, state, zip_code)
         VALUES (%s, %s, %s)
         ON CONFLICT DO NOTHING
     """, location_batch)
 
-    # Insert into hospital table
+    # Updated hospital insertion to handle multiple matching locations
     cursor.executemany("""
         INSERT INTO hospital (hospital_pk, hospital_name, location_id)
         VALUES (%s, %s, (
-            SELECT id FROM location WHERE city = %s AND state = %s AND zip_code = %s
+            SELECT id FROM location 
+            WHERE city = %s AND state = %s AND zip_code = %s 
+            ORDER BY id LIMIT 1
         ))
         ON CONFLICT DO NOTHING
     """, hospital_batch)
 
-    # Insert into hospital_quality table
     cursor.executemany("""
         INSERT INTO hospital_quality (
             facility_id, quality_rating, rating_date, ownership, hospital_type, provides_emergency_services
