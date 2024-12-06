@@ -11,17 +11,21 @@ def db_connection():
     """Connects to PostgreSQL database using credentials
 
     The credentials.py file should have string objects:
-    DB_NAME, DB_USER, and DB_PASSWORD
+    DB_HOST, DB_NAME, DB_USER, and DB_PASSWORD
 
     Returns
     -------
     connection object
         Connection to the appropropriate SQL database
     """
-    return psycopg.connect(
-        host="pinniped.postgres.database.azure.com", dbname=credentials.DB_NAME,
-        user=credentials.DB_USER, password=credentials.DB_PASSWORD
-    )
+    try:
+        return psycopg.connect(
+            host=credentials.DB_HOST, dbname=credentials.DB_NAME,
+            user=credentials.DB_USER, password=credentials.DB_PASSWORD
+        )
+    except psycopg.errors.OperationalError as e:
+        print(f"Error occurred while connecting to the database: {e}")
+        raise
 
 
 def prep_data(file_path):
@@ -75,29 +79,36 @@ def insert_location(cur, data_hhs):
     data_hhs: pandas dataframe
         All columns of the dataset containing data to be inserted
     """
-    location_data = data_hhs[["city", "state", "zip", "latitude", "longitude",
+    location_data = data_hhs[["city", "state", "zip", "address", "latitude", "longitude",
                               "fips_code"]].itertuples(index=False, name=None)
     # Convert NaNs to None
     location_data = (
-        (city, state, zip, latitude if not np.isnan(latitude) else None,
+        (city, state, zip, address, latitude if not np.isnan(latitude) else None,
          longitude if not np.isnan(longitude) else None, fips_code if not np.isnan(fips_code) else None)
-        for city, state, zip, latitude, longitude, fips_code in location_data
+        for city, state, zip, address, latitude, longitude, fips_code in location_data
     )
 
-    for row in location_data:
-        try:
-            cur.execute(
-                """
-                INSERT INTO location (city, state, zip_code, latitude, longitude, fips_code)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (city, state, zip_code, latitude, longitude) DO NOTHING
-                """,
-                row
-            )
-        except psycopg.Error as e:
-            city, state, zip = row
-            print(f"Error inserting location for city={city}, state={state}, zip={zip}: {e}")
-            raise
+    try:
+        cur.executemany(
+            """
+            INSERT INTO location (city, state, zip_code, address, latitude, longitude, fips_code)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (city, state, zip_code, address, latitude, longitude) DO NOTHING
+            """,
+            location_data
+        )
+    except psycopg.IntegrityError as e:
+        print(f"Integrity error occurred for row {cur.rowcount}: {e}")
+        raise
+    except psycopg.DataError as e:
+        print(f"Data error occurred for row {cur.rowcount}: {e}")
+        raise
+    except psycopg.errors.UniqueViolation as e:
+        print(f"Unique constraint violation occurred for row {cur.rowcount}: {e}")
+        raise
+    except psycopg.Error as e:  # Generic error
+        print(f"Error inserting location for row {cur.rowcount}: {e}")
+        raise
 
 
 def get_location(cur, data_hhs):
@@ -116,14 +127,15 @@ def get_location(cur, data_hhs):
     cities = list(data_hhs['city'])
     states = list(data_hhs['state'])
     zip_codes = list(data_hhs['zip'])
+    addresses = list(data_hhs['address'])
     latitudes = list(data_hhs['latitude'])
     longitudes = list(data_hhs['longitude'])
     fips_codes = list(data_hhs['fips_code'])
     cur.execute("SELECT id FROM location "
-                "WHERE (location.city, location.state, location.zip_code, "
+                "WHERE (location.city, location.state, location.zip_code, location.address, "
                 "location.latitude, location.longitude, location.fips_code) "
-                "IN (SELECT * FROM unnest(%s::text[], %s::text[], %s::text[], %s::float[], %s::float[], %s::text[]))",
-                (cities, states, zip_codes, latitudes, longitudes, fips_codes))
+                "IN (SELECT * FROM unnest(%s::text[], %s::text[], %s::text[], %s::text[], %s::float[], %s::float[], %s::text[]))",
+                (cities, states, zip_codes, addresses, latitudes, longitudes, fips_codes))
     return [row[0] for row in cur.fetchall()]
 
 
@@ -143,24 +155,30 @@ def insert_hospital(cur, data_hhs, location_ids):
                      for hospital_pk, hospital_name, location_id
                      in zip(data_hhs['hospital_pk'], data_hhs['hospital_name'], location_ids)]
 
-    for row in hospital_data:
-        try:
-            cur.execute(
-                """
-                INSERT INTO hospital (hospital_pk, hospital_name, location_id)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (hospital_pk) DO NOTHING
-                """,
-                row
-            )
-        except psycopg.errors.ForeignKeyViolation as e:
-            hospital_pk, hospital_name = row
-            print(f"ForeignKeyViolation for hospital_pk={hospital_pk}, hospital_name={hospital_name}: {e}")
-            raise
-        except psycopg.Error as e:
-            hospital_name = row
-            print(f"Error inserting hospital with hospital_name={hospital_name}: {e}")
-            raise
+    try:
+        cur.executemany(
+            """
+            INSERT INTO hospital (hospital_pk, hospital_name, location_id)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (hospital_pk) DO NOTHING
+            """,
+            hospital_data
+        )
+    except psycopg.errors.ForeignKeyViolation as e:
+        print(f"ForeignKeyViolation for row {cur.rowcount}: {e}")
+        raise
+    except psycopg.IntegrityError as e:
+        print(f"Integrity error occurred for row {cur.rowcount}: {e}")
+        raise
+    except psycopg.DataError as e:
+        print(f"Data error occurred for row {cur.rowcount}: {e}")
+        raise
+    except psycopg.errors.UniqueViolation as e:
+        print(f"Unique constraint violation occurred for row {cur.rowcount}: {e}")
+        raise
+    except psycopg.Error as e:  # Generic error
+        print(f"Error inserting hospital for row {cur.rowcount}: {e}")
+        raise
 
 
 def get_hospital(cur, data_hhs):
@@ -223,24 +241,30 @@ def insert_weekly_report(cur, data_hhs, hospital_ids):
             pediatric_occupied, icu_occupied, covid_total, covid_adult_icu, hospital_id in weekly_data
     )
 
-    for row in weekly_data:
-        try:
-            cur.execute(
-                """
-                INSERT INTO weekly_report (collection_week, all_adult_hospital_beds_7_day_avg,
-                all_pediatric_inpatient_beds_7_day_avg, all_adult_hospital_inpatient_bed_occupied_7_day_avg,
-                all_pediatric_inpatient_bed_occupied_7_day_avg, total_icu_beds_7_day_avg, icu_beds_used_7_day_avg,
-                inpatient_beds_used_covid_7_day_avg, staffed_icu_adult_patients_confirmed_covid_7_day_avg,
-                hospital_weekly_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                row
-            )
-        except psycopg.errors.ForeignKeyViolation as e:
-            collection_week, hospital_id = row
-            print(f"ForeignKeyViolation for hospital_id={hospital_id}, collection_week={collection_week}: {e}")
-            raise
-        except psycopg.Error as e:
-            collection_week, hospital_id = row
-            print(f"Error inserting weekly report for hospital_id={hospital_id}, collection_week={collection_week}: {e}")
-            raise
+    try:
+        cur.executemany(
+            """
+            INSERT INTO weekly_report (collection_week, all_adult_hospital_beds_7_day_avg,
+            all_pediatric_inpatient_beds_7_day_avg, all_adult_hospital_inpatient_bed_occupied_7_day_avg,
+            all_pediatric_inpatient_bed_occupied_7_day_avg, total_icu_beds_7_day_avg, icu_beds_used_7_day_avg,
+            inpatient_beds_used_covid_7_day_avg, staffed_icu_adult_patients_confirmed_covid_7_day_avg,
+            hospital_weekly_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            weekly_data
+        )
+    except psycopg.errors.ForeignKeyViolation as e:
+        print(f"ForeignKeyViolation for row {cur.rowcount}: {e}")
+        raise
+    except psycopg.IntegrityError as e:
+        print(f"Integrity error occurred for row {cur.rowcount}: {e}")
+        raise
+    except psycopg.DataError as e:
+        print(f"Data error occurred for row {cur.rowcount}: {e}")
+        raise
+    except psycopg.errors.UniqueViolation as e:
+        print(f"Unique constraint violation occurred for row {cur.rowcount}: {e}")
+        raise
+    except psycopg.Error as e:  # Generic error
+        print(f"Error inserting weekly_report for row {cur.rowcount}: {e}")
+        raise
