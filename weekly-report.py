@@ -4,6 +4,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import pandas as pd
 import psycopg
+import credentials
 import plotly.express as px
 import json
 import requests
@@ -19,10 +20,10 @@ st.set_page_config(page_title="HHS COVID-19 Weekly Report", layout="wide")
 
 # Database Configuration
 DB_CONFIG = {
-    'host': st.secrets["database"]["host"],
-    'dbname': st.secrets["database"]["dbname"],
-    'user': st.secrets["database"]["user"],
-    'password': st.secrets["database"]["password"]
+    'host': credentials.DB_HOST,
+    'dbname': credentials.DB_NAME,
+    'user': credentials.DB_USER,
+    'password': credentials.DB_PASSWORD
 }
 
 
