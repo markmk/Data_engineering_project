@@ -76,6 +76,38 @@ def plot_beds_utilization_streamlit(df):
     st.pyplot(fig)
 
 
+def plot_total_beds_used(df):
+    """
+    Plot total hospital beds used per week, split into all cases and COVID cases.
+
+    Args:
+        df (pd.DataFrame): DataFrame with 'collection_week', 'total_beds_used', and 'covid_beds_used'.
+    """
+    if df.empty:
+        st.warning("No data available for Total Beds Used.")
+        return
+
+    # Ensure proper data types
+    df['collection_week'] = pd.to_datetime(df['collection_week'])
+    df.sort_values('collection_week', inplace=True)
+
+    # Plot
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.plot(df['collection_week'], df['total_beds_used'], label='All Cases', marker='o')
+    ax.plot(df['collection_week'], df['covid_beds_used'], label='COVID Cases', marker='o')
+
+    # Formatting
+    ax.set_title("Total Hospital Beds Used Per Week")
+    ax.set_xlabel("Week")
+    ax.set_ylabel("Number of Beds")
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+    plt.xticks(rotation=45)
+    ax.legend()
+
+    # Render in Streamlit
+    st.pyplot(fig)
+
+
 def plot_covid_cases_map(df):
     """
     Create a map showing the number of COVID cases by state.
@@ -293,6 +325,17 @@ QUERIES = {
     GROUP BY hq.quality_rating
     ORDER BY hq.quality_rating;
     """,
+    "weekly_beds_used": """
+    SELECT
+        collection_week,
+        SUM(all_adult_hospital_inpatient_bed_occupied_7_day_avg +
+            all_pediatric_inpatient_bed_occupied_7_day_avg) AS total_beds_used,
+        SUM(inpatient_beds_used_covid_7_day_avg) AS covid_beds_used
+    FROM weekly_report
+    WHERE collection_week <= %s
+    GROUP BY collection_week
+    ORDER BY collection_week;
+    """, 
     "covid_cases_by_state": """
     SELECT
         loc.state,
@@ -405,6 +448,14 @@ def generate_report(selected_date, conn):
         plot_covid_cases_map(covid_cases_df)
     else:
         st.warning("No data available for COVID cases by state.")
+
+    # 5. Total Beds Used Over Time
+    st.markdown("### Total Hospital Beds Used Per Week (All Cases vs COVID Cases)")
+    weekly_beds_df = execute_query(QUERIES["weekly_beds_used"], conn, [selected_date_str])
+    if not weekly_beds_df.empty:
+        plot_total_beds_used(weekly_beds_df)
+    else:
+        st.warning("No data available for Total Beds Used.")
 
     # Additional Analysis: States with Fewest Open Beds
     st.markdown("### States with Fewest Open Beds")
