@@ -8,6 +8,9 @@ import credentials
 import plotly.express as px
 import json
 import requests
+from datetime import timedelta
+import matplotlib.dates as mdates
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -174,7 +177,9 @@ def plot_hospital_utilization_streamlit(df):
     df_filtered = df[df['state'].isin(top_states)]
 
     # Set up the figure
-    plt.figure(figsize=(14, 6))
+    unique_weeks = sorted(df['collection_week'].unique())
+    # Set the x-ticks to match the available collection weeks
+    fig, ax = plt.subplots(figsize=(14, 6))
     # Plot each state's data
     for state in top_states:
         state_df = df_filtered[df_filtered['state'] == state]
@@ -183,6 +188,16 @@ def plot_hospital_utilization_streamlit(df):
             state_df['percent_utilization'],
             label=f"{state} ({state_df['percent_utilization'].iloc[-1]:.1f}%)"
         )
+
+    # Format the x-ticks to match the selected dates
+    ax.set_xticks(unique_weeks)  # Use the unique collection weeks as x-ticks
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))  # Format dates as YYYY-MM-DD
+    ax.set_xlabel("Week", fontsize=12)
+    ax.set_ylabel("Percent Utilization (%)", fontsize=12)
+    ax.set_title(
+        "Hospital Utilization by State Over Time\n"
+        "(Top 10 States by Current Utilization)", fontsize=14
+    )
 
     # Adjust x-axis ticks and labels
     plt.xticks(rotation=45)
@@ -217,11 +232,11 @@ def add_text_streamlit(title, text):
 QUERIES = {
     "hospital_records_summary": """
     WITH weekly_counts AS (
-        SELECT
-            collection_week,
-            COUNT(DISTINCT hospital_weekly_id) AS hospital_count
-        FROM weekly_report
-        GROUP BY collection_week
+    SELECT
+        collection_week,
+        COUNT(DISTINCT hospital_weekly_id) AS hospital_count
+    FROM weekly_report
+    GROUP BY collection_week
     )
     SELECT
         collection_week,
@@ -229,9 +244,9 @@ QUERIES = {
         COALESCE(LAG(hospital_count) OVER (ORDER BY collection_week), 0) AS previous_week_count,
         hospital_count - COALESCE(LAG(hospital_count) OVER (ORDER BY collection_week), 0) AS week_difference
     FROM weekly_counts
-    WHERE collection_week = (
-        SELECT MAX(collection_week) FROM weekly_report WHERE collection_week <= %s
-    );
+    WHERE collection_week IN (%s, %s)
+    ORDER BY collection_week DESC
+    LIMIT 1;
     """,
     "beds_summary": """
     WITH recent_weeks AS (
@@ -348,7 +363,10 @@ def generate_report(selected_date, conn):
         selected_date (datetime.date): The week-ending date for the report.
         conn (psycopg.Connection): The database connection object.
     """
+    previous_week = selected_date - timedelta(weeks=1)
+    
     selected_date_str = selected_date.strftime('%Y-%m-%d')
+    previous_week_str = previous_week.strftime('%Y-%m-%d')
 
     # Header
     st.header(f"HHS COVID-19 Weekly Report")
@@ -357,7 +375,7 @@ def generate_report(selected_date, conn):
 
     # 1. Hospital Records Summary
     st.markdown("### Hospital Records Summary")
-    hospital_records_df = execute_query(QUERIES["hospital_records_summary"], conn, [selected_date_str])
+    hospital_records_df = execute_query(QUERIES["hospital_records_summary"], conn, [selected_date_str, previous_week_str])
     if not hospital_records_df.empty:
         hospital_records_df['collection_week'] = pd.to_datetime(hospital_records_df['collection_week']).dt.strftime('%Y-%m-%d')
         st.table(hospital_records_df)
@@ -461,7 +479,7 @@ def main():
                 selected_date_str = st.sidebar.selectbox("Select Week Ending Date", available_dates)
                 selected_date = datetime.strptime(selected_date_str, '%Y-%m-%d').date()
                 st.sidebar.write(f"Selected date: {selected_date}")
-                
+   
                 # Generate the report for the selected date
                 generate_report(selected_date, conn)
             else:
