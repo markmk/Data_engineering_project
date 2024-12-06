@@ -1,2 +1,6 @@
+streamlit
 matplotlib
+pandas
 psycopg[binary]
+plotly
+requests
