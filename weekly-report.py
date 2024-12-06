@@ -96,6 +96,10 @@ def plot_total_beds_used(df):
     ax.plot(df['collection_week'], df['total_beds_used'], label='All Cases', marker='o')
     ax.plot(df['collection_week'], df['covid_beds_used'], label='COVID Cases', marker='o')
 
+    # Format the x-ticks to match the selected dates
+    unique_weeks = sorted(df['collection_week'].unique())
+    ax.set_xticks(unique_weeks)  # Use the unique collection weeks as x-ticks
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))  # Format dates as YYYY-MM-DD
     # Formatting
     ax.set_title("Total Hospital Beds Used Per Week")
     ax.set_xlabel("Week")
@@ -224,12 +228,6 @@ def plot_hospital_utilization_streamlit(df):
     # Format the x-ticks to match the selected dates
     ax.set_xticks(unique_weeks)  # Use the unique collection weeks as x-ticks
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))  # Format dates as YYYY-MM-DD
-    ax.set_xlabel("Week", fontsize=12)
-    ax.set_ylabel("Percent Utilization (%)", fontsize=12)
-    ax.set_title(
-        "Hospital Utilization by State Over Time\n"
-        "(Top 10 States by Current Utilization)", fontsize=14
-    )
 
     # Adjust x-axis ticks and labels
     plt.xticks(rotation=45)
